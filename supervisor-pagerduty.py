@@ -1,47 +1,61 @@
-#        DO WHAT THE FUCK YOU WANT TO PUBLIC LICENSE 
-#                    Version 2, December 2004 
-
-# Copyright (C) 2004 Sam Hocevar <sam@hocevar.net> 
-
-# Everyone is permitted to copy and distribute verbatim or modified 
-# copies of this license document, and changing it is allowed as long 
-# as the name is changed. 
-
-#            DO WHAT THE FUCK YOU WANT TO PUBLIC LICENSE 
-#   TERMS AND CONDITIONS FOR COPYING, DISTRIBUTION AND MODIFICATION 
-
-#  0. You just DO WHAT THE FUCK YOU WANT TO.
+#!/usr/bin/env python
+#
+# Script originally by Sam Hocevar <sam@hocevar.net> (2004)
+# Refined by tak-aryelle <https://gist.github.com/tak-aryelle> (2015)
+#
 
 import urllib2
 import json
 from supervisor import childutils
 import sys
 import socket
+import time
 
- 
 class PagerDutyNotifier(object):
     def __init__(self, pd_service_key):
         self.pd_service_key = pd_service_key
-        def run(self):
-            while True:
-                headers, payload = childutils.listener.wait()
-                sys.stderr.write(str(headers) + '\n')
-                payload = dict(v.split(':') for v in payload.split(' '))
-                sys.stderr.write(str(payload) + '\n')
-                if headers['eventname'] == 'PROCESS_STATE_EXITED' and not int(payload['expected']):
-                    data = {'service_key': self.pd_service_key,
-                            'event_type': 'trigger',
-                            'description': '{} service has crashed unexpectedly on {}'.format(payload['processname'], socket.gethostname())
-                    }
-                    try:
-                        res = urllib2.urlopen('https://events.pagerduty.com/generic/2010-04-15/create_event.json', json.dumps(data))
-                    except urllib2.HTTPError, ex:
-                        sys.stderr.write('{} - {}\n{}'.format(ex.code, ex.reason, ex.read()))
-                    else:
-                        sys.stderr.write('{}, {}\n'.format(res.code, res.msg))
-                    childutils.listener.ok()
-                    sys.stderr.flush()
-    
+        self.pd_url = 'https://events.pagerduty.com/generic/2010-04-15/create_event.json'
+        self.status = True
+    def run(self):
+        while True:
+            headers, payload = childutils.listener.wait()
+            sys.stderr.write(str(headers) + '\n')
+            payload = dict(v.split(':') for v in payload.split(' '))
+            sys.stderr.write(str(payload) + '\n')
+            if headers['eventname'] == 'PROCESS_STATE_FATAL':
+                details = {}
+                self.send(payload, headers, 'trigger', '{} service has crashed unexpectedly on {}'.format(payload['processname'], socket.gethostname()), details)
+            if headers['eventname'] == 'PROCESS_STATE_RUNNING':
+                details = { 'fixed at': time.strftime("%c") }
+                self.send(payload, headers, 'resolve', 'Process recreated by supervisor', details)
+            if self.status:
+                childutils.listener.ok()
+            else:
+                childutils.listener.fail()
+                self.status = True
+            sys.stderr.flush()
+    def send(self, payload, headers, event_type, description, details):
+        incident_key = '{}/{}'.format(socket.gethostname(), payload['processname'])
+        client = '{}'.format(headers['server'])
+
+        details = dict(details, **headers)
+        details = dict(details, **payload)
+
+        data = {'service_key':  self.pd_service_key,
+                'incident_key': incident_key,
+                'event_type':   event_type,
+                'description':  description,
+                'client':       client,
+                'details':	     details
+        }
+        try:
+            res = urllib2.urlopen(self.pd_url, json.dumps(data))
+        except urllib2.HTTPError, ex:
+            sys.stderr.write('{} - {}\n{}\n'.format(ex.code, ex.reason, ex.read()))
+            self.status = False
+        else:
+            sys.stderr.write('{}, {}\n'.format(res.code, res.msg))
+
 if __name__ == '__main__':
     pager_duty_service_key = sys.argv[1]
     pager_duty_notifer = PagerDutyNotifier(pager_duty_service_key)
