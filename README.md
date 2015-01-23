@@ -9,13 +9,17 @@ Mostly supervisord will restart the program successfully. So it may be useful to
 
 # Installation
 Copy the pagerduty.py into e.g. /etc/supervisor folder and make it executable
+```
     cd /etc/supervisor
     wget https://github.com/tak-aryelle/supervisor-pagerduty/raw/master/pagerduty.py
     chmod 755 pagerduty.py
+```
     
 Add pagerduty.conf to your supervisord config file, adjust path and add your API key, then update supervisor:
+```
     supervisorctl reread
     supervisorctl update
     supervisorctl add pagerduty
-    
+```
+ 
 Done.
